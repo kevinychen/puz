@@ -7,16 +7,7 @@ Usage:
 Writes out a cleaned version of the Wikipedia file in the form:
 TITLE: [article title]
 SUMMARY: [summary]
-where [summary] is one of:
-    [first line of main article]
-    #REDIRECT [redirect link]
-    #REFERENCE [pipe delimited list of reference links]
-
-TODO:
-    - Pages that start with '[blah] redirects here'
-    - Pages that start with '#redirect' or '#REDIRECT[blah]' without a delimiting space
-    - Pages with an unclosed quote in an HTML tag <ref name='[blah] [no ending quote]...>
-    - Other reference keywords, e.g. 'a list of', and 'List of'
+REDIRECT: ['~' delimited list of redirects]
 """
 
 from HTMLParser import HTMLParser
@@ -29,7 +20,6 @@ TAGS_TO_CLEAN = ['curly', 'pipe', 'ref', 'math', 'div']
 WIKI_MARKS_TO_HTML_TAG = [('{{', '<curly>'), ('}}', '</curly>'),
         ('[[', '<square>'), (']]', '</square>'),
         ('{|', '<pipe>'), ('|}', '</pipe>')]
-REFERENCE_KEYWORDS = ['may refer to:', '==Events==']
 
 class SummaryParser(HTMLParser):
     def __init__(self):
@@ -46,7 +36,7 @@ class SummaryParser(HTMLParser):
     def handle_endtag(self, tag):
         if any([t in self.tags for t in TAGS_TO_IGNORE_WIKI_MARKS]) and self.tags[-1] != tag:
             return
-        while self.tags:
+        while tag in self.tags:
             if self.tags.pop() == tag:
                 break
     def handle_data(self, data):
@@ -59,14 +49,6 @@ class SummaryParser(HTMLParser):
             return
         self.data.append(data)
 
-def get_references(text):
-    index = -1
-    while True:
-        index = text.find('<square>', index + 1)
-        if index == -1:
-            break
-        yield text[index + len('<square>') : text.find('</square>', index)].split('|')[0]
-
 def get_summary(text):
     parser = SummaryParser()
     for wiki_mark, tag in WIKI_MARKS_TO_HTML_TAG:
@@ -74,11 +56,27 @@ def get_summary(text):
     for line in text.split('\n'):
         parser.feed(line)
         if parser.data:
+            if sum([len(d) for d in parser.data]) < 100:
+                parser.data.append(' ')
+                continue
+            # Wikitext prefixes intro lines with ':', e.g. ': blah redirects here'; ignore.
+            if parser.data[0][0] == ':':
+                del parser.data[:]
+                continue
             break
-    summary = ''.join(parser.data)
-    if any([k in summary for k in REFERENCE_KEYWORDS]):
-        summary = '#REFERENCE ' + '|'.join(get_references(text))
-    return summary
+    return ''.join(parser.data)
+
+def is_redirect_page(text):
+    text = text.lower()
+    return text[:len('#redirect')] == '#redirect' or '{{disambiguation' in text
+
+def get_redirects(text):
+    index = -1
+    while True:
+        index = text.find('[[', index + 1)
+        if index == -1:
+            break
+        yield text[index + len('[[') : text.find(']]', index)].split('|')[0]
 
 class WikiParser(HTMLParser):
     def __init__(self, out):
@@ -92,7 +90,10 @@ class WikiParser(HTMLParser):
             self.title = data
         elif tag == 'text' and self.title:
             self.out.write('TITLE: %s\n' % self.title)
-            self.out.write('SUMMARY: %s\n' % get_summary(data))
+            if is_redirect_page(data):
+                self.out.write('REDIRECT: %s\n' % '~'.join(get_redirects(data)))
+            else:
+                self.out.write('SUMMARY: %s\n' % get_summary(data))
     def handle_data(self, data):
         self.data.append(data)
     def handle_entityref(self, name):
@@ -103,5 +104,8 @@ if __name__ == '__main__':
     index = 0
     for line in stdin.readlines():
         # Remove all non-ASCII characters because they sometimes trip up HTMLParser
-        parser.feed(sub(r'[^\x00-\x7F]+', ' ', line))
+        line = sub(r'[^\x00-\x7F]+', ' ', line)
+        # Unmatched '&quot;'s mess up the HTMLParser; just remove them
+        line = line.replace('&quot;', '')
+        parser.feed(line)
 
