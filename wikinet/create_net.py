@@ -10,7 +10,7 @@ SUMMARY: [summary]
 REDIRECT: ['~' delimited list of redirects]
 """
 
-from HTMLParser import HTMLParser
+from HTMLParser import HTMLParser, HTMLParseError
 from htmlentitydefs import name2codepoint
 from re import sub
 from sys import stdin, stdout
@@ -54,7 +54,10 @@ def get_summary(text):
     for wiki_mark, tag in WIKI_MARKS_TO_HTML_TAG:
         text = text.replace(wiki_mark, tag)
     for line in text.split('\n'):
-        parser.feed(line)
+        try:
+            parser.feed(line)
+        except HTMLParseError:
+            break
         if parser.data:
             if sum([len(d) for d in parser.data]) < 100:
                 parser.data.append(' ')
