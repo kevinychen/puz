@@ -20,4 +20,5 @@ do
     bunzip2 data/articles$i.bz2
     python create_net.py < data/articles$i > data/net$i
 done
+python process_nets.py
 
