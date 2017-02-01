@@ -10,6 +10,8 @@ DARK_LEVEL = 384
 # The smaller the value, the more accurately the grid will be aligned with the word search
 WAVELEN_GAP = 0.1
 
+DICTIONARY_FILE = '/usr/share/dict/words'
+
 CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 NEIGHBORS = ((0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1))
@@ -35,6 +37,9 @@ def toAnnotatedImage(im, points):
             newPix[x + dx, y + dy] = (255, 0, 0)
     return newIm
 
+def inBounds((x, y), (w, h)):
+    return x >= 0 and x < w and y >= 0 and y < h
+
 def findBlobs(im):
     pix = im.load()
     visited = set()
@@ -45,7 +50,7 @@ def findBlobs(im):
                 blob = set()
                 while q:
                     x, y = q.pop()
-                    if x >= 0 and x < im.size[0] and y >= 0 and y < im.size[1] and (x, y) not in blob and isDark(pix[x,y]):
+                    if inBounds((x, y), im.size) and (x, y) not in blob and isDark(pix[x, y]):
                         blob.add((x, y))
                         for (dx, dy) in NEIGHBORS:
                             q.append((x + dx, y + dy))
@@ -82,30 +87,62 @@ def findGrid(points):
 
     return ex - sx + 1, ey - sy + 1, ox + dx * sx, oy + dy * sy, dx, dy
 
-def findLetter((lx, ly)):
-    blob, _ = min(blobs, key=lambda (blob, (x, y)): abs(x - lx) + abs(y - ly))
-    xs, ys = zip(*blob)
-    minX, maxX, minY, maxY = min(xs) - 3, max(xs) + 3, min(ys) - 3, max(ys) + 3
-    newIm = Image.new(im.mode, (maxX - minX, maxY - minY))
-    newPix = newIm.load()
-    for x in range(minX, maxX):
-        for y in range(minY, maxY):
-            newPix[x - minX, y - minY] = (255, 255, 255)
-    for x, y in blob:
-        newPix[x - minX, y - minY] = (0, 0, 0)
-    return pytesseract.image_to_string(newIm, config='-psm 10 -c tessedit_char_whitelist="%s"' % CHARS)
+def findBlob((x, y), blobs, grid):
+    w, h, ox, oy, dx, dy = grid
+    return min(blobs, key=lambda (blob, (cx, cy)): abs((ox + x * dx) - cx) + abs((oy + y * dy) - cy))
 
 def findLetters(im, blobs, grid):
     w, h, ox, oy, dx, dy = grid
-    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-    letters = pool.map(findLetter, [(ox + x * dx, oy + y * dy) for y in range(h) for x in range(w)])
-    return [[letters[y * w + x] for x in range(w)] for y in range(h)]
+    def getRowImage(ly):
+        rowBlobs = [findBlob((lx, ly), blobs, grid) for lx in range(w)]
+        xs, ys = zip(*[(x, y) for (blob, (cx, cy)) in rowBlobs for (x, y) in blob])
+        minX, maxX, minY, maxY = min(xs) - 3, max(xs) + 3, min(ys) - 3, max(ys) + 3
+        newIm = Image.new(im.mode, (maxX - minX, maxY - minY))
+        newPix = newIm.load()
+        for x in range(minX, maxX):
+            for y in range(minY, maxY):
+                newPix[x - minX, y - minY] = (255, 255, 255)
+        for blob, (cx, cy) in rowBlobs:
+            for x, y in blob:
+                newPix[x - minX, y - minY] = (0, 0, 0)
+        return newIm
+    config = '-psm 7 -c tessedit_char_whitelist="%s" -c load_system_dawg=0 -c load_freq_dawg=0' % CHARS
+    return w, h, [pytesseract.image_to_string(getRowImage(y), config=config) for y in range(h)]
+
+def getDictionary():
+    return set([word.upper() for word in open(DICTIONARY_FILE).read().splitlines()])
+
+def wordsearch(letters, dictionary):
+    w, h, grid = letters
+    for l in range(max(w, h), 1, -1):
+        for x in range(w):
+            for y in range(h):
+                for dx, dy in NEIGHBORS:
+                    if inBounds((x + (l - 1) * dx, y + (l - 1) * dy), (w, h)):
+                        coords = [(x + d * dx, y + d * dy) for d in range(l)]
+                        word = ''.join(map(lambda (x, y): grid[y][x], coords))
+                        if word in dictionary:
+                            yield coords, word
+
+def toAnnotatedBlobImage(im, coords, blobs, grid):
+    newIm = Image.new(im.mode, im.size)
+    newIm.putdata(im.getdata())
+    newPix = newIm.load()
+    for coord in coords:
+        blob, (cx, cy) = findBlob(coord, blobs, grid)
+        for x, y in blob:
+            newPix[x, y] = (255, 128, 0)
+            for dx, dy in NEIGHBORS:
+                newPix[x + dx, y + dy] = (255, 128, 0)
+    return newIm
 
 im = openImage('/Users/kchen/Downloads/wordsearch.jpg')
 im = toBinaryImage(im)
 blobs = list(findBlobs(im))
 _, points = zip(*blobs)
 grid = findGrid(points)
-for line in findLetters(im, blobs, grid):
-    print ''.join(line)
+letters = findLetters(im, blobs, grid)
+for index, (coords, word) in enumerate(wordsearch(letters, getDictionary())):
+    print index, word
+    toAnnotatedBlobImage(im, coords, blobs, grid).save('output/result_%3s.png' % index)
 
