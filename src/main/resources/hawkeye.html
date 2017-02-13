@@ -5,23 +5,34 @@
                 Upload word search:
                 <input type="file" id="image" />
                 <button id="submit" type="submit">Search!</button>
+                <div id="spinner"></div>
+                <div id="output">
+                    <hr />
+                    <table>
+                        <tr>
+                            <td><div id="scrollable"><ul id="output-words"></ul></div></td>
+                            <td><div id="canvas-div"><img id="output-image" src="#" >
+                                <canvas id="canvas"></canvas></div></td>
+                        </tr>
+                    </table>
+                </div>
                 <hr />
                 Configuration:
                 <table>
                     <tr>
                         <td><input type="text" id="dark-cutoff" value="256" /></td>
                         <td><b>Darkness cutoff (0-768):</b>
-                        the higher the value, the more likely pixels are considered as black.</td>
+                            the higher the value, the more likely pixels are considered as black.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="min-blob-separation" value="2" /></td>
                         <td><b>Minimum separation (0-1000):</b>
-                        black pixels within this distance are considered a single letter.</td>
+                            black pixels within this distance are considered a single letter.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="min-blob-size-relative" value="0.005" /></td>
                         <td><b>Minimum size relative to image (0.0-1.0):</b>
-                        any letter must have width and height at least this fraction of the full image, otherwise it will be ignored.</td>
+                            any letter must have width and height at least this fraction of the full image, otherwise it will be ignored.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="min-word-length" value="3" /></td>
@@ -34,54 +45,44 @@
                     <tr>
                         <td><input type="text" id="max-blob-separation-ratio" value="1.8" /></td>
                         <td><b>Maximum separation ratio (1.0-2.0):</b>
-                        for each letter, all distances to neighboring letters must be at most this ratio from the minimum distance.</td>
+                            for each letter, all distances to neighboring letters must be at most this ratio from the minimum distance.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="max-word-bend-angle" value="20" /></td>
                         <td><b>Maximum bend angle (0-360):</b>
-                        connecting all letters of a word will never veer more than this value.</td>
+                            connecting all letters of a word will never veer more than this value.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="blob-border-for-OCR" value="5" /></td>
                         <td><b>OCR border (0-1000):</b>
-                        width of border placed around each letter for better character recognition.</td>
+                            width of border placed around each letter for better character recognition.</td>
                     </tr>
                     <tr>
                         <td><input type="text" id="max-batch-for-OCR" value="50" /></td>
                         <td><b>Parallelism (1-1000):</b>
-                        number of characters fed into OCR simultaneously.</td>
+                            number of characters fed into OCR simultaneously.</td>
                     </tr>
                 </table>
             </div>
         </fieldset>
-        <div id="wordsearch-spinner" class="loader"></div>
-        <div id="wordsearch-output">
-            <div>
-                <ul id="wordsearch-output-words"></ul>
-            </div>
-            <div>
-                <img id="wordsearch-output-image" src="#">
-            </div>
-        </div>
         <script>
             (function() {
                 function id(s) {
                     return document.getElementById(s);
                 }
-                id("wordsearch-spinner").style.display = "none";
-                id("wordsearch-output").style.display = "none";
+                id("spinner").style.display = "none";
+                id("output").style.display = "none";
                 id("image").addEventListener("change", function() {
                     if (id("image").files && id("image").files[0]) {
-                        console.log("hi");
                         var reader = new FileReader();
                         reader.onload = function(e) {
-                            id("wordsearch-output-image").src = e.target.result;
+                            id("output-image").src = e.target.result;
                         }
                         reader.readAsDataURL(id("image").files[0]);
                     }
                 });
                 id("submit").addEventListener("click", function() {
-                    id("wordsearch-spinner").style.display = "block";
+                    id("spinner").style.display = "block";
                     var xhr = new XMLHttpRequest();
                     xhr.open("POST", "/hawkeye/submit");
                     var formData = new FormData();
@@ -98,8 +99,8 @@
                     xhr.send(formData);
                     xhr.onreadystatechange = function() {
                         if (xhr.readyState == XMLHttpRequest.DONE) {
-                            id("wordsearch-spinner").style.display = "none";
-                            var wordsEl = id("wordsearch-output-words");
+                            id("spinner").style.display = "none";
+                            var wordsEl = id("output-words");
                             wordsEl.innerHTML = "";
 
                             words = JSON.parse(xhr.responseText);
@@ -111,16 +112,33 @@
                             }).forEach(function(word) {
                                 var wordEl = document.createElement("li");
                                 wordEl.appendChild(document.createTextNode(word));
+                                wordEl.addEventListener("mouseover", function() {
+                                    var ctx = id("canvas").getContext('2d');
+                                    ctx.fillStyle = "#FF0000";
+                                    var points = words[word];
+                                    var scale = id("output-image").clientHeight / id("output-image").naturalHeight;
+                                    for (var i = 0; i < points.length; i += 2) {
+                                        ctx.fillRect(scale * points[i], scale * points[i + 1], 1, 1);
+                                    }
+                                });
+                                wordEl.addEventListener("mouseout", function() {
+                                    var ctx = id("canvas").getContext('2d');
+                                    ctx.clearRect(0, 0, id("canvas").width, id("canvas").height);
+                                });
                                 wordsEl.appendChild(wordEl);
                             });
-                            id("wordsearch-output").style.display = "block";
+                            id("output").style.display = "block";
+                            id("canvas").style.left = id("output-image").offsetLeft;
+                            id("canvas").style.top = id("output-image").offsetTop;
+                            id("canvas").width = id("output-image").width;
+                            id("canvas").height = id("output-image").height;
                         }
                     }
                 });
             })();
         </script>
         <style>
-            .loader {
+            #spinner {
                 border: 16px solid #f3f3f3; /* Light grey */
                 border-top: 16px solid #3498db; /* Blue */
                 border-radius: 50%;
@@ -129,13 +147,26 @@
                 animation: spin 2s linear infinite;
             }
 
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+
             img {
                 height: 90vh;
             }
 
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
+            #scrollable {
+                height: 90vh;
+                overflow: auto;
+            }
+
+            #canvas-div {
+                position: relative;
+            }
+
+            canvas {
+                position: absolute;
             }
         </style>
     </body>
